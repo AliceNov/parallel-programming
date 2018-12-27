@@ -1,67 +1,102 @@
-#include<iostream>
-#include<time.h>
-#include<mpi.h>
-using namespace std;
-int main(int argc, char* argv[]){
+#include "mpi.h"
+#include <iostream>
+#include <ctime>
+#include <Windows.h>
+#include <algorithm>
 
+#define BUF 0
+#define READ_REQUEST 1
+#define FINISH_READ 2
+#define WRITE_REQUEST 3
+#define REQUEST 4
+
+using namespace std;
+
+void main(int argc, char** argv)
+{
+	time_t t;
+	int request = -2, response = 0, recieve = 1;
+	int data = 0, index = 0;
 	int ProcNum, ProcRank;
-	double times;
-	int numOfReaders = 0;
-	int numOfWriters = 0;
+	MPI_Status status;
+	MPI_Request mpiRequest;
 
 	MPI_Init(&argc, &argv);
 	MPI_Comm_size(MPI_COMM_WORLD, &ProcNum);
 	MPI_Comm_rank(MPI_COMM_WORLD, &ProcRank);
 
-	numOfReaders = atoi(argv[1]);
-	numOfWriters = atoi(argv[2]);
-
-
-	if (ProcRank % 2 == 0)
+	if (ProcRank == 0) // proc with buf
 	{
-		//writer
-		cout << "Writer " << ProcRank << " come" << endl;
+		int wc = (ProcNum - 1) / 2 + (ProcNum - 1) % 2;
+		int rc = 0;
+		cout << "Writers count = " << wc << endl;
 
-		count_write[ProcRank] = 1;
-		for (int i = 0; i < ProcNum; i++)
-		{
-			if ((count_write[i] == 1) && (ProcRank != i))
-			{
-				int j = 0;
-				MPI_Recv(&j, 1, MPI_INT, i, 0, MPI_COMM_WORLD, &Status);
-				cout << "Writer " << ProcRank << " wait" << endl;
+		while (true){
+			if (recieve){
+				MPI_Irecv(&request, 1, MPI_INT, MPI_ANY_SOURCE, REQUEST, MPI_COMM_WORLD, &mpiRequest);
+				recieve = 0;
+			}
+			if (!recieve){
+				MPI_Test(&mpiRequest, &index, &status);
+				if ((index) && (request == WRITE_REQUEST)){
+					if (!rc){
+						response = 1;
+						MPI_Send(&response, 1, MPI_INT, status.MPI_SOURCE, BUF, MPI_COMM_WORLD);
+						cout << "Writer #" << status.MPI_SOURCE << "is writing" << endl;
+						MPI_Recv(&data, 1, MPI_INT, MPI_ANY_SOURCE, status.MPI_SOURCE, MPI_COMM_WORLD, &status);
+						recieve = 1;
+					}
+					else{
+						response = 0;
+						MPI_Send(&response, 1, MPI_INT, status.MPI_SOURCE, BUF, MPI_COMM_WORLD);
+						cout << "Writer #" << status.MPI_SOURCE << "is waiting" << endl;
+						recieve = 1;
+					}
+				}
+				if ((index) && (request == READ_REQUEST)){
+					cout << "Reader #" << status.MPI_SOURCE << "is reading" << endl;
+					rc++;
+					MPI_Isend(&data, 1, MPI_INT, status.MPI_SOURCE, READ_REQUEST, MPI_COMM_WORLD, &request);
+					recieve = 1;
+				}
+				if ((index) && (request == FINISH_READ)){
+					rc--;
+					cout << "Reader #" << status.MPI_SOURCE << "is finished" << endl;
+					recieve = 1;
+				}
+
 			}
 		}
-		cout << "Writer " << ProcRank << " write" << endl;
-		count_write[ProcRank] = 0;
-		cout << "Writer " << ProcRank << " gone" << endl;
+		MPI_Finalize();
 	}
-	else
-	{
-		//reader
-		cout << "Reader " << ProcRank << " come" << endl;
-		for (int i = 0; i < ProcNum; i++)
-		{
-			if (count_write[i] == 1)
-			{
-				int j = 0;
-				MPI_Recv(&j, 1, MPI_INT, i, 0, MPI_COMM_WORLD, &Status);
-				cout << "Reader " << ProcRank << " wait" << endl;
-
-			}
+	//writer
+	else if (ProcRank % 2 == 1) {
+		request = WRITE_REQUEST;
+		srand((unsigned)time(&t));
+		data = ProcRank;
+		while (true){
+				MPI_Send(&request, 1, MPI_INT, BUF, REQUEST, MPI_COMM_WORLD);
+				MPI_Recv(&response, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &status);
+				if (response){
+					MPI_Send(&data, 1, MPI_INT, BUF, ProcRank, MPI_COMM_WORLD);
+				}
+				Sleep(15000 + 100 * ProcRank);
 		}
-		cout << "Reader " << ProcRank << " read" << endl;
-		cout << "Reader " << ProcRank << " gone" << endl;
-
+	}
+	else{
+		while (true){
+				request = READ_REQUEST;
+				MPI_Send(&request, 1, MPI_INT, BUF, REQUEST, MPI_COMM_WORLD);
+				MPI_Recv(&data, 1, MPI_INT, BUF, READ_REQUEST, MPI_COMM_WORLD, &status);
+				Sleep(500 * ProcRank);
+				request = FINISH_READ;
+				MPI_Send(&request, 1, MPI_INT, BUF, REQUEST, MPI_COMM_WORLD);
+				Sleep(1000 + 80 * ProcRank);
+		}
 	}
 
 
+	MPI_Barrier(MPI_COMM_WORLD);
 
-
-
-
-	times = MPI_Wtime();
-	cout << "Time = " << MPI_Wtime() - times;
 	MPI_Finalize();
-	return 0;
 }
